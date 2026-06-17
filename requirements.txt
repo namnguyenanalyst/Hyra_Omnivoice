@@ -1,0 +1,13 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+torch==2.8.0+cu128
+torchaudio==2.8.0+cu128
+transformers>=5.3.0
+accelerate
+pydub
+gradio
+tensorboardX
+webdataset
+numpy
+soundfile
+librosa

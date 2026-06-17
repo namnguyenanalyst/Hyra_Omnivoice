@@ -6,6 +6,7 @@ __pycache__/
 dist/
 build/
 .venv/
+venv/
 .env
 .DS_Store
 .pytest_cache/
@@ -28,3 +29,7 @@ examples/exp*
 .claude/
 *.wav
 *.jsonl
+
+# XTTS API
+outputs/
+commands.txt
