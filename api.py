@@ -39,7 +39,7 @@ def clone_voice(
     ref_audio: UploadFile = File(..., description="File audio mẫu (giọng cần clone)"),
     ref_text: str = Form(None, description="Nội dung của file audio mẫu (để trống sẽ tự động nhận diện)"),
     language: str = Form("Vietnamese", description="Ngôn ngữ (mặc định là Vietnamese)"),
-    speed: float = Form(1.0, description="Tốc độ đọc"),
+    speed: float = Form(1.0, ge=0.25, le=1.25, description="Tốc độ đọc (0.25x - 1.25x)"),
     num_step: int = Form(32, description="Số bước Inference (càng cao càng tốt nhưng chậm)"),
 ):
     try:
@@ -63,17 +63,24 @@ def clone_voice(
             postprocess_output=True,
         )
         
-        # Gọi model để sinh audio
+        # Gọi model để sinh audio ở tốc độ gốc (để đảm bảo chất lượng AI)
         audio = model.generate(
             text=text,
             language=language,
             generation_config=gen_config,
             voice_clone_prompt=voice_clone_prompt,
-            speed=speed,
+            speed=1.0,
         )
         
+        y = audio[0].astype(np.float32)
+        
+        # Thay đổi tốc độ bằng thuật toán RubberBand chất lượng cao
+        if speed != 1.0:
+            import pyrubberband as pyrb
+            y = pyrb.time_stretch(y, model.sampling_rate, speed)
+            
         # Chuyển đổi mảng numpy thành file âm thanh thực
-        waveform = (audio[0] * 32767).astype(np.int16)
+        waveform = (y * 32767).astype(np.int16)
         
         # Lưu file vào thư mục public /outputs thay vì trả về trực tiếp
         file_id = str(uuid.uuid4())

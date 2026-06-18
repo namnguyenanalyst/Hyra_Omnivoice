@@ -11,3 +11,4 @@ webdataset
 numpy
 soundfile
 librosa
+pyrubberband==0.3.0
