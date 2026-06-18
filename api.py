@@ -4,6 +4,9 @@ import tempfile
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from typing import List
+import json
 import torch
 import numpy as np
 import soundfile as sf
@@ -16,6 +19,21 @@ app = FastAPI(title="OmniVoice Voice Cloning API", description="API for Zero-Sho
 # Phục vụ file tĩnh (để backend tải file .wav về qua /output/...)
 os.makedirs("outputs", exist_ok=True)
 app.mount("/output", StaticFiles(directory="outputs"), name="output")
+
+# Tải từ điển phát âm
+DICT_FILE = "dictionary.json"
+
+def load_dictionary():
+    if os.path.exists(DICT_FILE):
+        with open(DICT_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_dictionary(data):
+    with open(DICT_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+pronunciation_dict = load_dictionary()
 
 # 1. Khởi tạo model khi start server
 device = get_best_device()
@@ -32,6 +50,44 @@ print("Model đã sẵn sàng!")
 @app.get("/")
 def ping():
     return {"status": "ok", "message": "OmniVoice XTTS is running"}
+
+class AddDictRequest(BaseModel):
+    words: str
+    pronunciations: str
+
+class DeleteDictRequest(BaseModel):
+    words: List[str]
+
+@app.get("/dictionary")
+def get_dictionary():
+    return [{"word": k, "pronunciation": v} for k, v in pronunciation_dict.items()]
+
+@app.post("/dictionary")
+def add_to_dictionary(req: AddDictRequest):
+    words_list = [w.strip() for w in req.words.split(",")]
+    prons_list = [p.strip() for p in req.pronunciations.split(",")]
+    
+    if len(words_list) != len(prons_list):
+        raise HTTPException(status_code=400, detail="Số lượng từ và cách đọc không khớp.")
+        
+    for w, p in zip(words_list, prons_list):
+        if w and p:
+            pronunciation_dict[w] = p
+            
+    save_dictionary(pronunciation_dict)
+    return {"status": "success", "message": f"Đã thêm {len(words_list)} từ."}
+
+@app.delete("/dictionary")
+def delete_from_dictionary(req: DeleteDictRequest):
+    deleted = 0
+    for w in req.words:
+        if w in pronunciation_dict:
+            del pronunciation_dict[w]
+            deleted += 1
+            
+    if deleted > 0:
+        save_dictionary(pronunciation_dict)
+    return {"status": "success", "message": f"Đã xóa {deleted} từ."}
 
 @app.post("/clone_voice")
 def clone_voice(
@@ -69,6 +125,11 @@ def clone_voice(
         
         import re
         import librosa
+        
+        # Áp dụng từ điển phát âm
+        for word, replacement in pronunciation_dict.items():
+            pattern = re.compile(rf'\b{re.escape(word)}\b', re.IGNORECASE)
+            text = pattern.sub(replacement, text)
         
         # Tiền xử lý: Tách văn bản thành các cụm theo dấu câu
         parts = re.split(r'([.,;\n]+)', text)

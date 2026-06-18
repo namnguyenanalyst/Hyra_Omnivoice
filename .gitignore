@@ -33,3 +33,4 @@ examples/exp*
 # XTTS API
 outputs/
 commands.txt
+dictionary.json
