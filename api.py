@@ -41,6 +41,10 @@ def clone_voice(
     language: str = Form("Vietnamese", description="Ngôn ngữ (mặc định là Vietnamese)"),
     speed: float = Form(1.0, ge=0.25, le=1.25, description="Tốc độ đọc (0.25x - 1.25x)"),
     num_step: int = Form(32, description="Số bước Inference (càng cao càng tốt nhưng chậm)"),
+    pause_period: float = Form(0.45, ge=0.0, description="Thời gian nghỉ sau dấu chấm (giây)"),
+    pause_comma: float = Form(0.25, ge=0.0, description="Thời gian nghỉ sau dấu phẩy (giây)"),
+    pause_semicolon: float = Form(0.3, ge=0.0, description="Thời gian nghỉ sau dấu chấm phẩy (giây)"),
+    pause_newline: float = Form(0.6, ge=0.0, description="Thời gian nghỉ sau khi xuống dòng (giây)"),
 ):
     try:
         # Lưu file audio mẫu (reference audio) tải lên vào thư mục tạm
@@ -63,21 +67,64 @@ def clone_voice(
             postprocess_output=True,
         )
         
-        # Gọi model để sinh audio ở tốc độ gốc (để đảm bảo chất lượng AI)
-        audio = model.generate(
-            text=text,
-            language=language,
-            generation_config=gen_config,
-            voice_clone_prompt=voice_clone_prompt,
-            speed=1.0,
-        )
+        import re
+        import librosa
         
-        y = audio[0].astype(np.float32)
+        # Tiền xử lý: Tách văn bản thành các cụm theo dấu câu
+        parts = re.split(r'([.,;\n]+)', text)
+        final_y = []
+        
+        # Sinh audio cho từng cụm và chèn khoảng lặng
+        for i in range(0, len(parts), 2):
+            chunk_text = parts[i].strip()
+            delim = parts[i+1] if i+1 < len(parts) else ""
+            
+            if chunk_text:
+                # Gọi model để sinh audio ở tốc độ gốc (để đảm bảo chất lượng AI)
+                audio = model.generate(
+                    text=chunk_text,
+                    language=language,
+                    generation_config=gen_config,
+                    voice_clone_prompt=voice_clone_prompt,
+                    speed=1.0,
+                )
+                chunk_y = audio[0].astype(np.float32)
+                
+                # Cắt khoảng lặng thừa do AI tự sinh ra bằng thư viện librosa
+                # top_db=40 là ngưỡng decibel tiêu chuẩn để cắt các âm thanh quá nhỏ (im lặng)
+                chunk_y, _ = librosa.effects.trim(chunk_y, top_db=40)
+                final_y.append(chunk_y)
+                
+            # Xử lý chèn khoảng lặng nhân tạo
+            if delim:
+                pause_sec = 0.0
+                if '.' in delim:
+                    pause_sec = pause_period
+                elif '\n' in delim:
+                    pause_sec = pause_newline
+                elif ';' in delim:
+                    pause_sec = pause_semicolon
+                elif ',' in delim:
+                    pause_sec = pause_comma
+                    
+                if pause_sec > 0:
+                    # Tính toán số lượng frames cần thiết. Nhân với speed để khi RubberBand 
+                    # tua nhanh/chậm thì khoảng lặng vẫn giữ đúng thời lượng người dùng set.
+                    silence_length = int(pause_sec * speed * model.sampling_rate)
+                    final_y.append(np.zeros(silence_length, dtype=np.float32))
+                    
+        # Nối tất cả các mảng lại với nhau
+        if len(final_y) > 0:
+            y = np.concatenate(final_y)
+        else:
+            y = np.zeros(1, dtype=np.float32)
         
         # Thay đổi tốc độ bằng thuật toán RubberBand chất lượng cao
         if speed != 1.0:
             import pyrubberband as pyrb
-            y = pyrb.time_stretch(y, model.sampling_rate, speed)
+            # Sử dụng cờ '-F' (Formant preservation) 
+            # để đảm bảo giữ nguyên tuyệt đối âm sắc gốc của giọng người.
+            y = pyrb.time_stretch(y, model.sampling_rate, speed, rbargs={'-F': ''})
             
         # Chuyển đổi mảng numpy thành file âm thanh thực
         waveform = (y * 32767).astype(np.int16)
