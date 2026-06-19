@@ -34,3 +34,6 @@ examples/exp*
 outputs/
 commands.txt
 dictionary.json
+commands.md
+.gitignore
+pros_cons.md
