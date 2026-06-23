@@ -37,3 +37,9 @@ dictionary.json
 commands.md
 .gitignore
 pros_cons.md
+queue.txt
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+*.log

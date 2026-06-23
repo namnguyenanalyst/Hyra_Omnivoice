@@ -13,3 +13,5 @@ soundfile
 librosa
 pyrubberband==0.3.0
 requests
+celery
+redis
