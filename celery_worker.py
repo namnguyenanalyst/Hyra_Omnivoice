@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import re
 import time
 import traceback
@@ -11,10 +15,12 @@ from celery.signals import worker_process_init
 from omnivoice import OmniVoice, OmniVoiceGenerationConfig
 from omnivoice.utils.common import get_best_device
 
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
 celery_app = Celery(
     'omnivoice_worker',
-    broker='redis://localhost:6379/0',
-    backend='redis://localhost:6379/0'
+    broker=REDIS_URL,
+    backend=REDIS_URL
 )
 
 celery_app.conf.update(

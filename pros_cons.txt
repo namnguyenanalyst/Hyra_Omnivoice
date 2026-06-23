@@ -1,0 +1,37 @@
+🌟 Điểm mạnh (Strengths)
+1. Kiến trúc hệ thống tối ưu & linh hoạt (Asynchronous Architecture)
+
+Tách biệt API và Inference: Sử dụng FastAPI cho tầng giao tiếp và đẩy các tác vụ nặng (suy luận AI) sang background worker thông qua Celery + Redis. Điều này giúp API server không bị treo hay quá tải khi có nhiều yêu cầu xử lý giọng nói đồng thời.
+Tải Model 1 lần (Singleton): Model AI nặng được tải sẵn vào GPU khi worker khởi tạo (@worker_process_init.connect), thay vì phải tải lại mỗi khi có request mới. Điều này tối ưu cực tốt về hiệu suất và VRAM.
+Đảm bảo giới hạn phần cứng: Celery worker được cấu hình worker_prefetch_multiplier=1 đảm bảo mỗi GPU worker chỉ xử lý đúng 1 task tại một thời điểm để tránh lỗi "CUDA out of memory".
+2. Tính năng AI mạnh mẽ & Đa dạng
+
+Zero-shot Voice Cloning: Có khả năng clone giọng nói chất lượng cao chỉ với 3-10 giây audio mẫu.
+Hỗ trợ quy mô lớn: Mô hình hỗ trợ hơn 600 ngôn ngữ và tốc độ xử lý rất nhanh (x40 thời gian thực).
+Voice Design: Cho phép tự tạo giọng đọc thông qua mô tả text (ví dụ: "female, high pitch").
+3. Xử lý âm thanh & Văn bản thông minh
+
+Quản lý ngắt nghỉ tự nhiên: Khi xử lý văn bản dài, worker tự động cắt nhỏ đoạn text theo các dấu câu (. , ; \n) để model xử lý từ từ, đồng thời chèn thêm khoảng lặng (silence) cực kỳ linh hoạt (có thể tùy chỉnh số giây nghỉ cho từng loại dấu câu riêng biệt).
+Quản lý từ điển phát âm (Pronunciation Dictionary): Có sẵn các API (/dictionary) giúp người dùng tùy biến cách đọc của các từ đặc biệt/từ lặp mà AI hay đọc sai bằng cách lưu vào dictionary.json. Chức năng này xử lý text trực tiếp trên API trước khi gửi vào Celery.
+Hỗ trợ tăng giảm tốc độ đọc: Sử dụng thư viện pyrubberband (time_stretch) để tinh chỉnh tốc độ đọc mà không làm méo giọng.
+4. Cơ chế Webhook & Retry an toàn
+
+Khi xử lý xong audio, Celery worker sẽ bắn một Webhook trả về kết quả cho ứng dụng gọi nó. Nếu URL bị lỗi, worker có cơ chế Retry tự động 3 lần cách nhau 5 giây.
+Có tích hợp tham số webhook_secret để bảo mật tính xác thực của luồng dữ liệu trả về.
+⚠️ Điểm yếu / Cần cải thiện (Weaknesses)
+1. Vấn đề lưu trữ File tĩnh (Khó Scale ngang)
+
+Code hiện tại đang lưu file audio được tạo ra ở thư mục outputs/ và public qua FastAPI StaticFiles (/output/...). File audio ref_audio đầu vào cũng lưu ở thư mục tạm tempfile trên máy chứa API server.
+Hệ quả: Nếu bạn chạy hệ thống này ở nhiều server (Ví dụ: 1 API server nằm riêng, 2 GPU server chạy Celery Worker), Celery Worker sẽ không tìm thấy file ref_audio được API tải lên, và URL kết quả mà Worker trả về cho Webhook cũng sẽ lưu trên ổ cứng của Worker thay vì API.
+Giải pháp: Cần sử dụng Object Storage (như Amazon S3, MinIO) để lưu file đầu vào/đầu ra chung thay vì lưu trên ổ cứng cục bộ (Local Filesystem).
+2. Quản lý cấu hình bị Hardcode (Hardcoded Configs)
+
+Địa chỉ Redis bị fix cứng là redis://localhost:6379/0 trong cả api.py và celery_worker.py.
+Điều này làm cho việc triển khai trên Docker hoặc cụm máy chủ khó khăn hơn vì phải vào sửa code. Nên chuyển cấu hình này ra biến môi trường (.env hoặc os.environ).
+3. Thiếu cơ chế Bảo mật và Rate Limit ở API
+
+Các endpoints như /clone_voice hay thay đổi từ điển /dictionary đang mở công khai (Public) không có Authentication (API Key, Bearer Token).
+Có thể dễ bị DDoS hoặc lạm dụng tài nguyên GPU nếu expose thẳng ra internet. Đồng thời, thư mục outputs/ cũng public mà không có xác thực, ai biết tên file đều tải được audio về.
+4. Khả năng rò rỉ rác (File Leak) khi lỗi hệ thống
+
+API Server có tạo file temp_ref_audio khi nhận request. Dù worker có dọn dẹp file tạm này đi sau khi chạy xong, nhưng nếu API Server crash hoặc Redis sập trước khi đẩy được task vào Celery Queue (hoặc worker crash giữa chừng do phần cứng), file tạm này sẽ nằm vĩnh viễn trên server gây tốn ổ cứng dần dần.

@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import re
 import uuid
 import tempfile
@@ -33,8 +37,8 @@ def save_dictionary(data):
 
 pronunciation_dict = load_dictionary()
 
-# Khởi tạo kết nối tới Celery (không tải model ở đây)
-celery_app = Celery('omnivoice_worker', broker='redis://localhost:6379/0')
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+celery_app = Celery('omnivoice_worker', broker=REDIS_URL)
 
 @app.get("/")
 def ping():

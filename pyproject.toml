@@ -43,6 +43,7 @@ dependencies = [
     "librosa",
     "celery>=5.6.3",
     "redis>=8.0.0",
+    "python-dotenv",
 ]
 
 [project.optional-dependencies]
