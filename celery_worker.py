@@ -57,7 +57,9 @@ def process_voice_job(self, job_data: dict):
     webhook_url = job_data["webhook_url"]
     webhook_secret = job_data["webhook_secret"]
     processed_text = job_data["processed_text"] # Text đã được xử lý dictionary ở API
-    temp_ref_audio_path = job_data["temp_ref_audio_path"]
+    temp_ref_audio_paths = job_data.get("temp_ref_audio_paths", [])
+    if "temp_ref_audio_path" in job_data:
+        temp_ref_audio_paths.append(job_data["temp_ref_audio_path"])
     ref_text = job_data["ref_text"]
     language = job_data["language"]
     speed = job_data["speed"]
@@ -74,8 +76,24 @@ def process_voice_job(self, job_data: dict):
     
     try:
         print(f"[Worker] Đang xử lý job: {job_id}")
+        import librosa
+        
+        y_list = []
+        for path in temp_ref_audio_paths:
+            y, _ = librosa.load(path, sr=model.sampling_rate)
+            y_list.append(y)
+            
+        if len(y_list) > 1:
+            combined_y = np.concatenate(y_list)
+            waveform = torch.from_numpy(combined_y)
+            ref_audio_input = (waveform, model.sampling_rate)
+        elif len(y_list) == 1:
+            ref_audio_input = temp_ref_audio_paths[0]
+        else:
+            raise ValueError("No reference audio provided")
+
         voice_clone_prompt = model.create_voice_clone_prompt(
-            ref_audio=temp_ref_audio_path,
+            ref_audio=ref_audio_input,
             ref_text=ref_text,
         )
         
@@ -145,11 +163,12 @@ def process_voice_job(self, job_data: dict):
         traceback.print_exc()
     finally:
         # Dọn dẹp file tạm
-        if os.path.exists(temp_ref_audio_path):
-            try:
-                os.remove(temp_ref_audio_path)
-            except Exception as e:
-                print(f"[Worker] Lỗi xóa file tạm: {e}")
+        for path in temp_ref_audio_paths:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception as e:
+                    print(f"[Worker] Lỗi xóa file tạm: {e}")
                 
     # Gọi Webhook
     payload = {

@@ -86,7 +86,7 @@ def delete_from_dictionary(req: DeleteDictRequest):
 def clone_voice(
     request: Request,
     text: str = Form(..., description="Văn bản cần đọc"),
-    ref_audio: UploadFile = File(..., description="File audio mẫu (giọng cần clone)"),
+    ref_audio: List[UploadFile] = File(..., description="File audio mẫu (giọng cần clone)"),
     webhook_url: str = Form(..., description="URL để AI Server gọi trả kết quả về"),
     webhook_secret: str = Form(..., description="Mã bảo mật gửi kèm trong Header X-Webhook-Secret"),
     ref_text: str = Form(None, description="Nội dung của file audio mẫu (để trống sẽ tự động nhận diện)"),
@@ -98,11 +98,13 @@ def clone_voice(
     pause_semicolon: float = Form(0.3, ge=0.0, description="Thời gian nghỉ sau dấu chấm phẩy (giây)"),
     pause_newline: float = Form(0.6, ge=0.0, description="Thời gian nghỉ sau khi xuống dòng (giây)"),
 ):
+    temp_ref_audio_paths = []
     try:
-        # Lưu file audio mẫu tải lên vào thư mục tạm
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_ref_audio:
-            temp_ref_audio.write(ref_audio.file.read())
-            temp_ref_audio_path = temp_ref_audio.name
+        # Lưu các file audio mẫu tải lên vào thư mục tạm
+        for audio_file in ref_audio:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_ref_audio:
+                temp_ref_audio.write(audio_file.file.read())
+                temp_ref_audio_paths.append(temp_ref_audio.name)
             
         job_id = str(uuid.uuid4())
         base_url = str(request.base_url)
@@ -119,7 +121,7 @@ def clone_voice(
             "webhook_url": webhook_url,
             "webhook_secret": webhook_secret,
             "processed_text": local_text, # Gửi text đã được thay thế
-            "temp_ref_audio_path": temp_ref_audio_path,
+            "temp_ref_audio_paths": temp_ref_audio_paths,
             "ref_text": ref_text,
             "language": language,
             "speed": speed,
@@ -135,9 +137,10 @@ def clone_voice(
         try:
             celery_app.send_task("process_voice_job", args=[job_data])
         except Exception as e:
-            # Xóa file tạm vừa tạo nếu đẩy vào queue thất bại (vd Redis chết)
-            if os.path.exists(temp_ref_audio_path):
-                os.remove(temp_ref_audio_path)
+            # Xóa các file tạm vừa tạo nếu đẩy vào queue thất bại (vd Redis chết)
+            for p in temp_ref_audio_paths:
+                if os.path.exists(p):
+                    os.remove(p)
             raise HTTPException(status_code=503, detail=f"Không thể kết nối đến Message Broker (Redis): {str(e)}")
         
         # Trả về JSON chứa job_id và trạng thái
