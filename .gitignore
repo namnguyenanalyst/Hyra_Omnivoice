@@ -43,3 +43,6 @@ queue.txt
 celerybeat-schedule
 celerybeat.pid
 *.log
+
+# Redis
+redis_data/
